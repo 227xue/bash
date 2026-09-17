@@ -1,0 +1,210 @@
+```bash
+#!/bin/bash
+set -e
+
+echo "=========================================="
+echo "   Debian / Ubuntu 新 VPS 初始化清理脚本"
+echo "=========================================="
+
+if [ "$EUID" -ne 0 ]; then
+    echo "错误：必须使用 root 执行！"
+    exit 1
+fi
+
+if [ ! -f /etc/os-release ]; then
+    echo "错误：无法识别系统。"
+    exit 1
+fi
+
+. /etc/os-release
+
+case "$ID" in
+    debian|ubuntu)
+        echo "[+] 系统：$PRETTY_NAME"
+        ;;
+    *)
+        echo "错误：仅支持 Debian / Ubuntu"
+        exit 1
+        ;;
+esac
+
+
+########################################
+# 1. 显示当前状态
+########################################
+
+echo
+echo "[1/9] 当前系统状态"
+
+echo
+echo "主机名："
+hostname
+
+echo
+echo "内核："
+uname -r
+
+echo
+echo "磁盘："
+df -h
+
+echo
+echo "内存："
+free -h
+
+
+########################################
+# 2. 修复可能存在的 dpkg 状态
+########################################
+
+echo
+echo "[2/9] 修复软件包状态"
+
+dpkg --configure -a || true
+
+apt-get -f install -y
+
+
+########################################
+# 3. 更新软件源
+########################################
+
+echo
+echo "[3/9] 更新软件源"
+
+apt-get update
+
+
+########################################
+# 4. 全面升级
+########################################
+
+echo
+echo "[4/9] 全面升级系统"
+
+DEBIAN_FRONTEND=noninteractive \
+apt-get full-upgrade -y
+
+
+########################################
+# 5. 清理旧软件
+########################################
+
+echo
+echo "[5/9] 清理无用软件包"
+
+apt-get autoremove --purge -y
+apt-get autoclean -y
+apt-get clean
+
+
+########################################
+# 6. 清理旧内核
+########################################
+
+echo
+echo "[6/9] 检查旧内核"
+
+if command -v purge-old-kernels >/dev/null 2>&1; then
+
+    purge-old-kernels -y
+
+else
+
+    echo "[!] purge-old-kernels 不存在"
+    echo "[!] 跳过自动删除旧内核"
+
+fi
+
+
+########################################
+# 7. 清理日志 / 缓存 / 临时文件
+########################################
+
+echo
+echo "[7/9] 清理系统垃圾"
+
+
+# systemd 日志只保留最近 3 天
+if command -v journalctl >/dev/null 2>&1; then
+    journalctl --vacuum-time=3d
+    journalctl --vacuum-size=100M
+fi
+
+
+# APT 缓存
+rm -rf /var/cache/apt/archives/*.deb
+
+
+# 临时目录
+find /tmp -xdev -mindepth 1 -mtime +1 -delete 2>/dev/null || true
+find /var/tmp -xdev -mindepth 1 -mtime +1 -delete 2>/dev/null || true
+
+
+########################################
+# 8. 清理失败的 systemd 服务状态
+########################################
+
+echo
+echo "[8/9] 检查失败服务"
+
+systemctl --failed --no-pager || true
+
+
+########################################
+# 9. 最终状态
+########################################
+
+echo
+echo "=========================================="
+echo "          清理 / 升级完成"
+echo "=========================================="
+
+echo
+echo "系统："
+echo "$PRETTY_NAME"
+
+echo
+echo "内核："
+uname -r
+
+echo
+echo "磁盘："
+df -h /
+
+echo
+echo "内存："
+free -h
+
+echo
+echo "失败服务："
+systemctl --failed --no-pager || true
+
+
+########################################
+# 重启
+########################################
+
+echo
+echo "=========================================="
+echo "系统已经升级并清理完成。"
+echo "建议现在重启服务器。"
+echo "=========================================="
+
+read -r -p "输入 YES 立即重启：" CONFIRM
+
+if [ "$CONFIRM" = "YES" ]; then
+
+    echo
+    echo "[+] 5 秒后重启..."
+    sleep 5
+    reboot
+
+else
+
+    echo
+    echo "[!] 未重启。"
+    echo "[!] 你可以稍后手动执行：reboot"
+
+fi
+```
